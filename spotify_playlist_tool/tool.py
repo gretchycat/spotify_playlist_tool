@@ -1,4 +1,3 @@
-
 import json
 import argparse
 import os
@@ -157,15 +156,22 @@ def push_tracks_to_playlist(sp, playlist_id, tracks, nodup=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Spotify Playlist Tool (Final + Fixes)")
-    parser.add_argument("--source", required=True)
-    parser.add_argument("--dest", required=True)
+    parser.add_argument("--source", required=False)
+    parser.add_argument("--dest", required=False)
+    parser.add_argument("--query", required=False)
+
     parser.add_argument("--nodup", action="store_true")
+
     parser.add_argument("--sort", choices=["alpha", "artist", "date"])
     parser.add_argument("--random", action="store_true")
+
     parser.add_argument("--force", action="store_true")
+
     parser.add_argument("--after")
     parser.add_argument("--before")
     parser.add_argument("--artist")
+    parser.add_argument("--genre")
+    parser.add_argument("--instrumental", action="store_true")
     parser.add_argument("--min_tempo", type=float)
     parser.add_argument("--max_tempo", type=float)
     parser.add_argument("--min_energy", type=float)
@@ -182,44 +188,63 @@ def main():
     args = parser.parse_args()
     sp = get_spotify_client()
 
-    filters = {k: v for k, v in vars(args).items() if v is not None and k.startswith(("min_", "max_", "after", "before", "artist"))}
+    filters = {k: v for k, v in vars(args).items() if v is not None and k.startswith(("min_", "max_", "after", "before", "artist", "genre", "instrumental"))}
 
     # Resolve playlist names
+    query = args.query
     src = args.source
     dst = args.dest
-    if not is_file(src) and src.lower() not in ["liked"] and len(src) != 22:
-        src = get_playlist_id_by_name(sp, src)
-    if not is_file(dst) and dst.lower() not in ["liked"] and len(dst) != 22:
-        dst = get_playlist_id_by_name(sp, dst, create_if_missing=True)
+    if ( query is not None ):
+        if not is_file(query) and query.lower() not in ["liked"] and len(query) != 22:
+            query = get_playlist_id_by_name(sp, query)
+        # Load tracks
+        if is_file(args.query):
+            print(f"Reading from playlist1 file: {args.query}")
+            tracks = load_tracks_from_file(query)
+        else:
+            tracks = fetch_tracks_from_spotify(sp, query)
 
-    if src == dst and not args.force:
-        print("Error: source and destination are the same. Use --force to override.")
+        tracks = deduplicate(tracks)
+        print("_report(tracks)")
+
+        pass
+    elif (src is not None and dst is not None):
+        if not is_file(src) and src.lower() not in ["liked"] and len(src) != 22:
+            src = get_playlist_id_by_name(sp, src)
+        if not is_file(dst) and dst.lower() not in ["liked"] and len(dst) != 22:
+            dst = get_playlist_id_by_name(sp, dst, create_if_missing=True)
+
+        if src == dst and not args.force:
+            print("Error: source and destination are the same. Use --force to override.")
+            sys.exit(1)
+
+        # Load tracks
+        if is_file(args.source):
+            print(f"Reading source from file: {args.source}")
+            tracks = load_tracks_from_file(args.source)
+        else:
+            tracks = fetch_tracks_from_spotify(sp, src)
+
+        tracks = deduplicate(tracks)
+
+        if filters:
+            feature_map = fetch_audio_features(sp, tracks)
+            tracks = filter_tracks(tracks, filters, feature_map)
+
+        if args.sort:
+            print(f"Sorting by: {args.sort}")
+            tracks = sort_tracks(tracks, args.sort)
+
+        if args.random:
+            print("Randomizing order")
+            random.shuffle(tracks)
+
+        if is_file(args.dest) or args.dest.endswith(".json"):
+            save_tracks_to_file(tracks, args.dest)
+        else:
+            push_tracks_to_playlist(sp, dst, tracks, nodup=args.nodup)
+    else:
+        parser.print_help()
         sys.exit(1)
-
-    # Load tracks
-    if is_file(args.source):
-        print(f"Reading source from file: {args.source}")
-        tracks = load_tracks_from_file(args.source)
-    else:
-        tracks = fetch_tracks_from_spotify(sp, src)
-
-    tracks = deduplicate(tracks)
-
-    if filters:
-        feature_map = fetch_audio_features(sp, tracks)
-        tracks = filter_tracks(tracks, filters, feature_map)
-
-    if args.sort:
-        print(f"Sorting by: {args.sort}")
-        tracks = sort_tracks(tracks, args.sort)
-
-    if args.random:
-        print("Randomizing order")
-        random.shuffle(tracks)
-
-    if is_file(args.dest) or args.dest.endswith(".json"):
-        save_tracks_to_file(tracks, args.dest)
-    else:
-        push_tracks_to_playlist(sp, dst, tracks, nodup=args.nodup)
 
 

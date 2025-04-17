@@ -1,3 +1,4 @@
+#!/usr/bin/python
 
 from .tool import main
 
